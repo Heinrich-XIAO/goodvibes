@@ -1,0 +1,15 @@
+/daemon/
+/data/
+.git/
+.env
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+/app/
+/db/
+/config/
+/spec/
+/tmp/
+/log/
+/storage/

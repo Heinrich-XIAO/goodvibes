@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "GoodVibes Web & T3 Code Harness Tracker",
+  "version": "0.2.0",
+  "description": "Tracks active prompt typing and VTT dictation on T3 Code, Claude.ai, ChatGPT, v0, Bolt, and Lovable — excludes AI response generation time.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.t3.codes/*",
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*",
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://v0.dev/*",
+        "https://bolt.new/*",
+        "https://lovable.dev/*"
+      ],
+      "js": ["content.js"]
+    }
+  ],
+  "host_permissions": ["http://127.0.0.1:42420/*"]
+}

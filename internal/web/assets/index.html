@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GoodVibes — Hack Club</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-dot"></span>
+        <span>goodvibes</span>
+        <span class="brand-tag">Go · AGPLv3</span>
+      </a>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="profile">Dashboard</button>
+        <button class="nav-btn" data-view="leaderboard">Builders</button>
+        <button class="nav-btn" data-view="audit">Audit Portal</button>
+        <button class="nav-btn" data-view="setup">Setup &amp; Plugins</button>
+      </nav>
+      <div class="auth-slot" id="auth-slot">
+        <a class="btn btn-sm btn-primary" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="auth-banner" class="card hidden" style="margin-bottom:16px;border-color:var(--warn)"></div>
+
+    <section id="view-profile" class="view">
+      <div id="empty-app-state" class="card hidden">
+        <div class="card-head">
+          <div>
+            <h2>No builder data yet</h2>
+            <p class="muted-sm" id="empty-app-msg">Sign in with Hack Club Auth and connect the local daemon to start logging real productive struggle time.</p>
+          </div>
+          <a class="btn btn-primary" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
+        </div>
+      </div>
+
+      <div id="profile-content" class="view hidden">
+        <div class="profile-header card">
+          <div class="profile-identity">
+            <div class="avatar" id="profile-avatar">?</div>
+            <div>
+              <div class="profile-name-row">
+                <h1 id="profile-display-name"></h1>
+                <span class="handle" id="profile-username"></span>
+                <span class="pill pill-blue hidden" id="profile-verified-badge">Hack Club Verified</span>
+                <span class="live-pill" id="live-pill">
+                  <span class="pulse-dot"></span>
+                  <span id="live-pill-text">Live</span>
+                </span>
+              </div>
+              <p class="bio" id="profile-bio"></p>
+            </div>
+          </div>
+          <div class="profile-actions">
+            <select id="profile-switcher" class="select hidden"></select>
+            <select id="window-select" class="select">
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90" selected>Last 90 days</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="card kpi-card kpi-primary">
+            <div class="kpi-label">Productive Struggle Time</div>
+            <div class="kpi-value" id="kpi-human">0s</div>
+            <div class="kpi-sub">Prompt typing + VTT + coding + review + testing</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Craft / Struggle Score</div>
+            <div class="kpi-value" id="kpi-score">—</div>
+            <div class="kpi-sub">Measures spec depth &amp; verification vs. slop</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Build Streak</div>
+            <div class="kpi-value" id="kpi-streak">0d</div>
+            <div class="kpi-sub" id="kpi-streak-sub">Longest: 0d</div>
+          </div>
+          <div class="card kpi-card kpi-muted">
+            <div class="kpi-label">Agent Time (Excluded)</div>
+            <div class="kpi-value" id="kpi-agent">0s</div>
+            <div class="kpi-sub">Tracked transparently · 0% counted as human hours</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-head">
+              <h2>Craft Breakdown</h2>
+              <span class="muted-sm">Active human effort by category</span>
+            </div>
+            <div class="stacked-bar" id="craft-bar"></div>
+            <div class="legend" id="craft-legend"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Projects &amp; Git</h2>
+              <span class="muted-sm">Auto-detected from git repos</span>
+            </div>
+            <div class="project-list" id="project-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Real-Time Activity Stream</h2>
+            <div class="row-gap">
+              <span class="muted-sm">Live SSE updates</span>
+              <button class="btn btn-sm btn-ghost" id="copy-badge-btn">Copy README Badge</button>
+            </div>
+          </div>
+          <div id="badge-preview" class="badge-preview"></div>
+          <div class="activity-table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Project</th>
+                  <th>Category</th>
+                  <th>Human</th>
+                  <th>Agent (Excl.)</th>
+                  <th>Harness / Model</th>
+                  <th>Craft</th>
+                </tr>
+              </thead>
+              <tbody id="activity-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-leaderboard" class="view hidden">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Public Builders (Last 30 Days)</h2>
+            <p class="muted-sm">Public by default — toggle private anytime in Setup &amp; Plugins.</p>
+          </div>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Builder</th>
+              <th>Productive Struggle</th>
+              <th>Excluded Agent Time</th>
+              <th>Avg Craft</th>
+              <th>Projects</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-audit" class="view hidden">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Audit &amp; Verification Portal (YSWS / Fraud Squad)</h2>
+            <p class="muted-sm">Submitted Audit Bundles uploaded via <code>goodvibes bundle --upload</code> appear here.</p>
+          </div>
+        </div>
+        <div id="submissions-list" class="submissions-list"></div>
+      </div>
+
+      <div id="submission-detail" class="card hidden">
+        <div class="card-head">
+          <div>
+            <h2 id="sub-detail-title">Audit Bundle Inspector</h2>
+            <p class="muted-sm" id="sub-detail-meta"></p>
+          </div>
+          <button class="btn btn-sm btn-ghost" id="close-sub-detail">Close</button>
+        </div>
+        <div id="sub-trust-grid" class="kpi-grid"></div>
+        <div id="sub-review-controls" class="review-box hidden">
+          <h3>Reviewer Decision</h3>
+          <div class="row-gap">
+            <input type="number" id="review-approved-sec" class="input" placeholder="Approved human seconds" />
+            <input type="text" id="review-notes" class="input grow" placeholder="Reviewer notes" />
+            <button class="btn btn-success" data-decision="approved">Approve</button>
+            <button class="btn btn-warn" data-decision="deflated">Deflate</button>
+            <button class="btn btn-danger" data-decision="flagged">Flag</button>
+          </div>
+        </div>
+        <div class="activity-table-wrap" style="margin-top:14px">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Category</th>
+                <th>Dur</th>
+                <th>Harness</th>
+                <th>Craft</th>
+                <th>Redacted Local Evidence</th>
+                <th>Hash</th>
+              </tr>
+            </thead>
+            <tbody id="sub-entries-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-setup" class="view hidden">
+      <div class="two-col">
+        <div class="card">
+          <h2>1. Install Local Daemon</h2>
+          <p class="muted-sm">Single static Go binary (~9.5 MB, &lt;12 MB RAM) for Windows, macOS, and Linux.</p>
+          <pre class="code-block"><code id="setup-cli-snippet"></code></pre>
+          <h3 style="margin-top:16px">2. Wrap Any CLI Agent (Agent Time Excluded)</h3>
+          <pre class="code-block"><code>./goodvibes wrap --harness claude-code -- claude -p
+./goodvibes wrap --harness codex --mode prompt_vtt -- codex</code></pre>
+          <h3 style="margin-top:16px">3. Submit Verifiable Audit Bundle</h3>
+          <pre class="code-block"><code>./goodvibes bundle --project MY_PROJECT --program "YSWS" --upload</code></pre>
+        </div>
+
+        <div class="card">
+          <h2>Account, API Keys &amp; Privacy</h2>
+          <div id="setup-account-box"></div>
+          <div class="divider"></div>
+          <h3>Supported Harnesses &amp; Plugins</h3>
+          <ul class="plugin-list">
+            <li><strong>T3 Code</strong> — <code>plugins/t3-code/</code> + <code>plugins/browser-ext/</code></li>
+            <li><strong>Claude Code</strong> — <code>plugins/claude-code/</code></li>
+            <li><strong>Cursor / VS Code / Windsurf</strong> — <code>plugins/vscode-cursor/</code></li>
+            <li><strong>Voice-to-Text (VTT)</strong> — <code>plugins/vtt/</code></li>
+            <li><strong>WakaTime Compatible</strong> — <code>POST /api/hackatime/v1/users/current/heartbeats</code></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

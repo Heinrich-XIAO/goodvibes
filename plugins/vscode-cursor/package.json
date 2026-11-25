@@ -1,0 +1,10 @@
+{
+  "name": "goodvibes-vscode",
+  "displayName": "GoodVibes Productive Struggle Tracker",
+  "description": "Passive human coding, diff review, and prompt tracker for VS Code, Cursor, and Windsurf (AGPLv3). Excludes AI agent generation time.",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "engines": { "vscode": "^1.85.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js"
+}
