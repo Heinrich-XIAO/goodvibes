@@ -2,31 +2,32 @@
 package server
 
 import (
-	"database/sql"
 	"net/http"
 	"os"
 
 	"github.com/hackclub/goodvibes/internal/controllers"
+	"github.com/hackclub/goodvibes/internal/convex"
 	"github.com/hackclub/goodvibes/internal/realtime"
 	"github.com/hackclub/goodvibes/internal/web"
 )
 
 // NewRouter builds the complete GoodVibes (Hackatime Go port) HTTP handler.
-func NewRouter(conn *sql.DB) (http.Handler, *controllers.App) {
-	app := controllers.NewApp(conn, realtime.NewHub())
+func NewRouter(cx *convex.Client) (http.Handler, *controllers.App) {
+	app := controllers.NewApp(cx, realtime.NewHub())
 	mux := http.NewServeMux()
 
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
-		var users, hbs int
-		_ = app.DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&users)
-		_ = app.DB.QueryRow("SELECT COUNT(*) FROM heartbeats WHERE deleted_at IS NULL").Scan(&hbs)
-		controllers.WriteJSON(w, http.StatusOK, map[string]any{
-			"ok":              true,
+		dbOK := app.Convex.Query(r.Context(), "health:ping", nil, nil) == nil
+		status := http.StatusOK
+		if !dbOK {
+			status = http.StatusServiceUnavailable
+		}
+		controllers.WriteJSON(w, status, map[string]any{
+			"ok":              dbOK,
+			"database":        "convex",
 			"service":         "goodvibes-go",
 			"auth_provider":   "hackclub",
 			"auth_configured": os.Getenv("HACKCLUB_CLIENT_ID") != "" && os.Getenv("HACKCLUB_CLIENT_SECRET") != "",
-			"users":           users,
-			"heartbeats":      hbs,
 		})
 	}
 	mux.HandleFunc("GET /up", healthHandler)

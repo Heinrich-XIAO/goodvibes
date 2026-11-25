@@ -14,29 +14,29 @@ import (
 
 // heartbeatInput supports BOTH WakaTime/Hackatime payloads and GoodVibes daemon payloads.
 type heartbeatInput struct {
-	Branch           string   `json:"branch"`
-	GitBranch        string   `json:"git_branch"`
-	Category         string   `json:"category"`
-	Editor           string   `json:"editor"`
-	Entity           string   `json:"entity"`
-	Language         string   `json:"language"`
-	Machine          string   `json:"machine"`
-	OperatingSystem  string   `json:"operating_system"`
-	Project          string   `json:"project"`
-	Type             string   `json:"type"`
-	UserAgent        string   `json:"user_agent"`
-	Plugin           string   `json:"plugin"`
-	LineAdditions    int      `json:"line_additions"`
-	LinesAdded       int      `json:"lines_added"`
-	LineDeletions    int      `json:"line_deletions"`
-	LinesDeleted     int      `json:"lines_deleted"`
-	Lineno           int      `json:"lineno"`
-	Lines            int      `json:"lines"`
-	CursorPos        int      `json:"cursorpos"`
-	ProjectRootCount int      `json:"project_root_count"`
-	Time             float64  `json:"time"`
-	Timestamp        float64  `json:"timestamp"`
-	IsWrite          bool     `json:"is_write"`
+	Branch           string  `json:"branch"`
+	GitBranch        string  `json:"git_branch"`
+	Category         string  `json:"category"`
+	Editor           string  `json:"editor"`
+	Entity           string  `json:"entity"`
+	Language         string  `json:"language"`
+	Machine          string  `json:"machine"`
+	OperatingSystem  string  `json:"operating_system"`
+	Project          string  `json:"project"`
+	Type             string  `json:"type"`
+	UserAgent        string  `json:"user_agent"`
+	Plugin           string  `json:"plugin"`
+	LineAdditions    int     `json:"line_additions"`
+	LinesAdded       int     `json:"lines_added"`
+	LineDeletions    int     `json:"line_deletions"`
+	LinesDeleted     int     `json:"lines_deleted"`
+	Lineno           int     `json:"lineno"`
+	Lines            int     `json:"lines"`
+	CursorPos        int     `json:"cursorpos"`
+	ProjectRootCount int     `json:"project_root_count"`
+	Time             float64 `json:"time"`
+	Timestamp        float64 `json:"timestamp"`
+	IsWrite          bool    `json:"is_write"`
 	// GoodVibes vibecoding fields:
 	HumanSeconds    int      `json:"human_seconds"`
 	AgentSeconds    int      `json:"agent_seconds"`
@@ -99,31 +99,22 @@ func (a *App) HandlePushHeartbeats(w http.ResponseWriter, r *http.Request) {
 	var responses []any
 	var lastHB *models.Heartbeat
 
-	for _, in := range inputs {
-		hb := a.normalizeHeartbeat(u.ID, r, in)
-		res, err := a.DB.Exec(`
-			INSERT OR IGNORE INTO heartbeats (
-				user_id, branch, category, editor, entity, language, machine, operating_system,
-				project, type, user_agent, line_additions, line_deletions, lineno, lines,
-				cursorpos, project_root_count, time, is_write, fields_hash, source_type, ip_address,
-				human_seconds, agent_seconds, harness, model, prompt_word_count, prompt_tech_terms,
-				keystrokes, struggle_score, flags_json, evidence_hash
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			hb.UserID, hb.Branch, hb.Category, hb.Editor, hb.Entity, hb.Language, hb.Machine, hb.OperatingSystem,
-			hb.Project, hb.Type, hb.UserAgent, hb.LineAdditions, hb.LineDeletions, hb.Lineno, hb.Lines,
-			hb.CursorPos, hb.ProjectRootCount, hb.Time, boolToInt(hb.IsWrite), hb.FieldsHash, int(hb.SourceType), hb.IPAddress,
-			hb.HumanSeconds, hb.AgentSeconds, hb.Harness, hb.Model, hb.PromptWordCount, hb.PromptTechTerms,
-			hb.Keystrokes, hb.StruggleScore, hb.FlagsJSON, hb.EvidenceHash,
-		)
-		if err == nil {
-			if id, idErr := res.LastInsertId(); idErr == nil {
-				hb.ID = id
-			}
-			lastHB = hb
-			responses = append(responses, []any{hb, http.StatusCreated})
-		} else {
-			responses = append(responses, []any{map[string]string{"error": err.Error()}, http.StatusUnprocessableEntity})
-		}
+	hbs := make([]*models.Heartbeat, len(inputs))
+	for i, in := range inputs {
+		hbs[i] = a.normalizeHeartbeat(u.ID, r, in)
+	}
+	var results []struct {
+		ID        string `json:"id"`
+		Duplicate bool   `json:"duplicate"`
+	}
+	if err := a.Convex.Mutation(r.Context(), "heartbeats:insertMany", map[string]any{"heartbeats": hbs}, &results); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for i, res := range results {
+		hbs[i].ID = res.ID
+		lastHB = hbs[i]
+		responses = append(responses, []any{hbs[i], http.StatusCreated})
 	}
 
 	if lastHB != nil && a.Hub != nil {
@@ -141,7 +132,7 @@ func (a *App) HandlePushHeartbeats(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusAccepted, map[string]any{"ok": true, "accepted": len(inputs), "heartbeat": lastHB})
 }
 
-func (a *App) normalizeHeartbeat(userID int64, r *http.Request, in heartbeatInput) *models.Heartbeat {
+func (a *App) normalizeHeartbeat(userID string, r *http.Request, in heartbeatInput) *models.Heartbeat {
 	ts := in.Time
 	if ts <= 0 {
 		ts = in.Timestamp
@@ -166,7 +157,7 @@ func (a *App) normalizeHeartbeat(userID int64, r *http.Request, in heartbeatInpu
 		editorName = in.Editor
 	}
 
-	cat := strings.TrimSpace(in.Category)
+	cat := strings.ToLower(strings.TrimSpace(in.Category))
 	if cat == "" {
 		cat = "coding"
 	}
@@ -264,15 +255,7 @@ func (a *App) HandleStatusBarToday(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
-	now := time.Now().UTC()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Unix()
-	var totalSec int
-	_ = a.DB.QueryRow(`
-		SELECT COALESCE(SUM(human_seconds), 0)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ? AND LOWER(category) != 'agent_working'`,
-		u.ID, startOfDay,
-	).Scan(&totalSec)
+	totalSec := a.humanSecondsSince(r, u.ID, time.Now())
 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -293,13 +276,7 @@ func (a *App) HandleStatsLast7Days(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -7)
-	var totalSec int
-	_ = a.DB.QueryRow(`
-		SELECT COALESCE(SUM(human_seconds), 0)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ? AND LOWER(category) != 'agent_working'`,
-		u.ID, start.Unix(),
-	).Scan(&totalSec)
+	totalSec := a.humanSecondsSince(r, u.ID, start)
 
 	hours := totalSec / 3600
 	mins := (totalSec % 3600) / 60
@@ -316,6 +293,17 @@ func (a *App) HandleStatsLast7Days(w http.ResponseWriter, r *http.Request) {
 			"human_readable_total": fmt.Sprintf("%d hrs %d mins", hours, mins),
 		},
 	})
+}
+
+// humanSecondsSince sums non-agent human seconds from the UTC day of since onward.
+func (a *App) humanSecondsSince(r *http.Request, userID string, since time.Time) int {
+	total := 0
+	for _, row := range a.rollups(r.Context(), userID, utcDay(since), lastDay) {
+		if row.Category != "agent_working" {
+			total += row.HumanSeconds
+		}
+	}
+	return total
 }
 
 func bytesTrimSpace(b []byte) []byte {

@@ -1,0 +1,13 @@
+{
+  "name": "goodvibes-convex",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.51.0",
+    "convex-helpers": "^0.1.137"
+  }
+}

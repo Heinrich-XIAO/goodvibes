@@ -92,7 +92,7 @@ func (e HackatimeExtensionTextType) String() string {
 
 // User mirrors app/models/user.rb + Hack Club Auth fields.
 type User struct {
-	ID                         int64                      `json:"id"`
+	ID                         string                     `json:"id"`
 	HackClubID                 string                     `json:"hackclub_id,omitempty"`
 	Username                   string                     `json:"username"`
 	DisplayName                string                     `json:"display_name"`

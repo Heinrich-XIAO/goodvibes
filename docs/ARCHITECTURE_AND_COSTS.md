@@ -36,9 +36,10 @@ GoodVibes solves this at the **state-machine level** (enforced both in the local
 - **Audit Bundles**: Only uploaded for submitted projects (~2,000–5,000/month × ~100 KB gzipped = **~0.5 GB/month**).
 
 ### Recommended Production Footprint
-- **Compute**: 1× Hetzner CCX23 / AX42 (4–8 vCPU, 16–32 GB RAM, 160–512 GB NVMe) — **$24–$45/month**.
-- **Backups / Object Storage** (Litestream SQLite WAL replication + Audit Bundle archive on Cloudflare R2 / Backblaze B2): **~$3/month**.
-- **Total Monthly Cost**: **~$30–$50/month** (<10% of the $500/month cap, with >10× headroom!).
+- **Compute**: the stateless Go server on Vercel (serverless) or 1× small VPS running the `Dockerfile` — **$0–$25/month**.
+- **Database**: Convex. The Go server calls Convex functions over HTTP with a shared secret (`GOODVIBES_SERVER_SECRET`). Each heartbeat batch is one mutation that also updates a `daily_rollups` row, so stats and leaderboards never scan raw heartbeats. Estimate (check current Convex pricing): with daemons batching ~10 heartbeats per request, ~1.3M ingestion mutations plus ~2–4M auth and dashboard queries a month fit a Convex Professional plan, **~$25–$100/month** as storage grows ~3.3 GB/month.
+- **Audit Bundle archive** on Cloudflare R2 / Backblaze B2: **~$3/month**.
+- **Total Monthly Cost**: **~$30–$130/month**, well under the $500/month cap.
 
 ### Low-Spec Client Footprint (10-year-old Windows Laptop)
 - Local daemon is a **single static Go binary** (`CGO_ENABLED=0`, zero runtime dependencies — no Electron, no Node, no Python required).

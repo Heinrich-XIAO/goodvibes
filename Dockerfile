@@ -9,7 +9,6 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /out/goodvibes-server /usr/local/bin/goodvibes-server
 ENV PORT=3000
-ENV GOODVIBES_DB=/data/goodvibes.db
-VOLUME ["/data"]
+# Requires CONVEX_URL and GOODVIBES_SERVER_SECRET at runtime.
 EXPOSE 3000
 CMD ["goodvibes-server"]

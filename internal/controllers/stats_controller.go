@@ -2,8 +2,10 @@
 package controllers
 
 import (
+	"context"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,10 +15,52 @@ import (
 	"github.com/hackclub/goodvibes/internal/services"
 )
 
+const lastDay = "9999-12-31"
+
+// rollup is one daily_rollups row: a (UTC day, project, category) bucket.
+type rollup struct {
+	Day           string `json:"day"`
+	Project       string `json:"project"`
+	Category      string `json:"category"`
+	HumanSeconds  int    `json:"human_seconds"`
+	AgentSeconds  int    `json:"agent_seconds"`
+	StruggleSum   int    `json:"struggle_sum"`
+	StruggleCount int    `json:"struggle_count"`
+	Heartbeats    int    `json:"heartbeats"`
+}
+
+func utcDay(t time.Time) string { return t.UTC().Format("2006-01-02") }
+
+// rollups returns buckets with day in [sinceDay, untilDay]; userID "" means every user.
+func (a *App) rollups(ctx context.Context, userID, sinceDay, untilDay string) []rollup {
+	args := map[string]any{"since_day": sinceDay, "until_day": untilDay}
+	if userID != "" {
+		args["user_id"] = userID
+	}
+	var rows []rollup
+	_ = a.Convex.Query(ctx, "stats:rollups", args, &rows)
+	return rows
+}
+
+// humanTotals sums billable seconds and the mean struggle score of scored heartbeats.
+func humanTotals(rows []rollup) (human, agent, heartbeats int, avgStruggle float64) {
+	var sSum, sCount int
+	for _, r := range rows {
+		human += r.HumanSeconds
+		agent += r.AgentSeconds
+		heartbeats += r.Heartbeats
+		sSum += r.StruggleSum
+		sCount += r.StruggleCount
+	}
+	if sCount > 0 {
+		avgStruggle = float64(sSum) / float64(sCount)
+	}
+	return
+}
+
 // HandleUserStats ports Api::V1::StatsController#user_stats + GoodVibes dashboard payload.
 func (a *App) HandleUserStats(w http.ResponseWriter, r *http.Request) {
-	username := r.PathValue("username")
-	target := a.LoadUserByUsernameOrID(username)
+	target := a.LoadUser(r.Context(), r.PathValue("username"))
 	if target == nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
@@ -31,19 +75,8 @@ func (a *App) HandleUserStats(w http.ResponseWriter, r *http.Request) {
 	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d >= 1 && d <= 365 {
 		days = d
 	}
-	since := float64(time.Now().AddDate(0, 0, -days).Unix())
-
-	var humanSec, agentSec, hbCount int
-	var avgStruggle float64
-	_ = a.DB.QueryRow(`
-		SELECT COALESCE(SUM(human_seconds),0),
-		       COALESCE(SUM(agent_seconds),0),
-		       COALESCE(AVG(CASE WHEN human_seconds > 0 THEN struggle_score END),0),
-		       COUNT(*)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ?`,
-		target.ID, since,
-	).Scan(&humanSec, &agentSec, &avgStruggle, &hbCount)
+	rows := a.rollups(r.Context(), target.ID, utcDay(time.Now().AddDate(0, 0, -days)), lastDay)
+	humanSec, agentSec, hbCount, avgStruggle := humanTotals(rows)
 
 	categories := map[string]int{
 		"prompt_typing": 0,
@@ -54,74 +87,42 @@ func (a *App) HandleUserStats(w http.ResponseWriter, r *http.Request) {
 		"testing":       0,
 		"agent_working": 0,
 	}
-	catRows, _ := a.DB.Query(`
-		SELECT LOWER(category), COALESCE(SUM(human_seconds),0), COALESCE(SUM(agent_seconds),0)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ?
-		GROUP BY LOWER(category)`, target.ID, since)
-	if catRows != nil {
-		for catRows.Next() {
-			var c string
-			var h, ag int
-			if catRows.Scan(&c, &h, &ag) == nil {
-				if c == "agent_working" {
-					categories["agent_working"] += ag
-				} else {
-					categories[c] += h
-				}
-			}
-		}
-		_ = catRows.Close()
-	}
-
 	type projectStat struct {
 		Name         string  `json:"name"`
 		HumanSeconds int     `json:"human_seconds"`
 		AgentSeconds int     `json:"agent_seconds"`
 		AvgStruggle  float64 `json:"avg_struggle"`
 	}
-	var projects []projectStat
-	pRows, _ := a.DB.Query(`
-		SELECT project, COALESCE(SUM(human_seconds),0), COALESCE(SUM(agent_seconds),0),
-		       COALESCE(AVG(CASE WHEN human_seconds > 0 THEN struggle_score END),0)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ? AND project != ''
-		GROUP BY project
-		ORDER BY SUM(human_seconds) DESC`, target.ID, since)
-	if pRows != nil {
-		for pRows.Next() {
-			var ps projectStat
-			if pRows.Scan(&ps.Name, &ps.HumanSeconds, &ps.AgentSeconds, &ps.AvgStruggle) == nil {
-				projects = append(projects, ps)
-			}
+	byProject := map[string][]rollup{}
+	dailyMap := map[string]int{}
+	for _, row := range rows {
+		if row.Category == "agent_working" {
+			categories[row.Category] += row.AgentSeconds
+		} else {
+			categories[row.Category] += row.HumanSeconds
 		}
-		_ = pRows.Close()
+		if row.Project != "" {
+			byProject[row.Project] = append(byProject[row.Project], row)
+		}
+		dailyMap[row.Day] += row.HumanSeconds
 	}
+	projects := []projectStat{}
+	for name, pr := range byProject {
+		h, ag, _, avg := humanTotals(pr)
+		projects = append(projects, projectStat{Name: name, HumanSeconds: h, AgentSeconds: ag, AvgStruggle: avg})
+	}
+	sort.Slice(projects, func(i, j int) bool { return projects[i].HumanSeconds > projects[j].HumanSeconds })
 
-	dailyMap := make(map[string]int)
-	dRows, _ := a.DB.Query(`
-		SELECT date(CAST(time AS INTEGER), 'unixepoch'), COALESCE(SUM(human_seconds),0)
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND time >= ?
-		GROUP BY 1`, target.ID, since)
-	if dRows != nil {
-		for dRows.Next() {
-			var day string
-			var sec int
-			if dRows.Scan(&day, &sec) == nil {
-				dailyMap[day] = sec
-			}
-		}
-		_ = dRows.Close()
-	}
 	loc, err := time.LoadLocation(target.Timezone)
 	if err != nil {
 		loc = time.UTC
 	}
 	currentStreak := models.CalculateStreak(dailyMap, time.Now(), loc)
 
+	var recent []models.Heartbeat
+	_ = a.Convex.Query(r.Context(), "heartbeats:recent", map[string]any{"user_id": target.ID, "limit": 25}, &recent)
 	type activityItem struct {
-		ID            int64   `json:"id"`
+		ID            string  `json:"id"`
 		Timestamp     float64 `json:"timestamp"`
 		Project       string  `json:"project"`
 		Category      string  `json:"category"`
@@ -132,20 +133,13 @@ func (a *App) HandleUserStats(w http.ResponseWriter, r *http.Request) {
 		Model         string  `json:"model"`
 		StruggleScore int     `json:"struggle_score"`
 	}
-	var recent []activityItem
-	rRows, _ := a.DB.Query(`
-		SELECT id, time, project, category, human_seconds, agent_seconds, harness, editor, model, struggle_score
-		FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL
-		ORDER BY time DESC, id DESC LIMIT 25`, target.ID)
-	if rRows != nil {
-		for rRows.Next() {
-			var it activityItem
-			if rRows.Scan(&it.ID, &it.Timestamp, &it.Project, &it.Category, &it.HumanSeconds, &it.AgentSeconds, &it.Harness, &it.Editor, &it.Model, &it.StruggleScore) == nil {
-				recent = append(recent, it)
-			}
-		}
-		_ = rRows.Close()
+	activity := make([]activityItem, 0, len(recent))
+	for _, hb := range recent {
+		activity = append(activity, activityItem{
+			ID: hb.ID, Timestamp: hb.Time, Project: hb.Project, Category: hb.Category,
+			HumanSeconds: hb.HumanSeconds, AgentSeconds: hb.AgentSeconds, Harness: hb.Harness,
+			Editor: hb.Editor, Model: hb.Model, StruggleScore: hb.StruggleScore,
+		})
 	}
 
 	pubTrust := target.PublicTrustLevel()
@@ -170,38 +164,26 @@ func (a *App) HandleUserStats(w http.ResponseWriter, r *http.Request) {
 			},
 			"categories":      categories,
 			"projects":        projects,
-			"recent_activity": recent,
+			"recent_activity": activity,
 		},
 	})
 }
 
-// HandleUserSpans ports Api::V1::StatsController#user_spans.
+// HandleUserSpans ports Api::V1::StatsController#user_spans over the latest 10k human heartbeats.
 func (a *App) HandleUserSpans(w http.ResponseWriter, r *http.Request) {
-	target := a.LoadUserByUsernameOrID(r.PathValue("username"))
+	target := a.LoadUser(r.Context(), r.PathValue("username"))
 	if target == nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
-	rows, _ := a.DB.Query(`
-		SELECT time FROM heartbeats
-		WHERE user_id = ? AND deleted_at IS NULL AND LOWER(category) != 'agent_working'
-		ORDER BY time ASC`, target.ID)
 	var times []float64
-	if rows != nil {
-		for rows.Next() {
-			var ts float64
-			if rows.Scan(&ts) == nil {
-				times = append(times, ts)
-			}
-		}
-		_ = rows.Close()
-	}
+	_ = a.Convex.Query(r.Context(), "heartbeats:humanTimes", map[string]any{"user_id": target.ID, "limit": 10000}, &times)
 	WriteJSON(w, http.StatusOK, map[string]any{"spans": models.ToSpans(times, models.HeartbeatTimeoutDuration)})
 }
 
 // HandleTrustFactor ports Api::V1::StatsController#trust_factor.
 func (a *App) HandleTrustFactor(w http.ResponseWriter, r *http.Request) {
-	target := a.LoadUserByUsernameOrID(r.PathValue("username"))
+	target := a.LoadUser(r.Context(), r.PathValue("username"))
 	if target == nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
@@ -212,7 +194,7 @@ func (a *App) HandleTrustFactor(w http.ResponseWriter, r *http.Request) {
 
 // HandleUserStream serves real-time SSE heartbeat updates for a user.
 func (a *App) HandleUserStream(w http.ResponseWriter, r *http.Request) {
-	target := a.LoadUserByUsernameOrID(r.PathValue("username"))
+	target := a.LoadUser(r.Context(), r.PathValue("username"))
 	viewer := a.CurrentUser(r)
 	if target == nil || (!target.AllowPublicStatsLookup && (viewer == nil || viewer.ID != target.ID)) {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found or private"})
@@ -223,21 +205,12 @@ func (a *App) HandleUserStream(w http.ResponseWriter, r *http.Request) {
 
 // HandleBadgeSVG serves GET /api/v1/badge/{username}.svg.
 func (a *App) HandleBadgeSVG(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimSuffix(r.PathValue("username"), ".svg")
-	target := a.LoadUserByUsernameOrID(raw)
+	target := a.LoadUser(r.Context(), strings.TrimSuffix(r.PathValue("username"), ".svg"))
 	if target == nil || !target.AllowPublicStatsLookup {
 		http.NotFound(w, r)
 		return
 	}
-	since := float64(time.Now().AddDate(0, 0, -30).Unix())
-	var humanSec int
-	var avgStruggle float64
-	_ = a.DB.QueryRow(`
-		SELECT COALESCE(SUM(human_seconds),0),
-		       COALESCE(AVG(CASE WHEN human_seconds > 0 THEN struggle_score END),0)
-		FROM heartbeats WHERE user_id = ? AND deleted_at IS NULL AND time >= ?`,
-		target.ID, since,
-	).Scan(&humanSec, &avgStruggle)
+	humanSec, _, _, avgStruggle := humanTotals(a.rollups(r.Context(), target.ID, utcDay(time.Now().AddDate(0, 0, -30)), lastDay))
 
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=60")
@@ -250,8 +223,6 @@ func (a *App) HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d >= 1 && d <= 365 {
 		days = d
 	}
-	since := float64(time.Now().AddDate(0, 0, -days).Unix())
-
 	type leaderRow struct {
 		Username     string  `json:"username"`
 		DisplayName  string  `json:"display_name"`
@@ -261,27 +232,9 @@ func (a *App) HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		ProjectCount int     `json:"project_count"`
 	}
 	users := []leaderRow{}
-	rows, _ := a.DB.Query(`
-		SELECT u.username, u.display_name,
-		       COALESCE(SUM(h.human_seconds),0),
-		       COALESCE(SUM(h.agent_seconds),0),
-		       COALESCE(AVG(CASE WHEN h.human_seconds > 0 THEN h.struggle_score END),0),
-		       COUNT(DISTINCT CASE WHEN h.project != '' THEN h.project END)
-		FROM users u
-		LEFT JOIN heartbeats h ON h.user_id = u.id AND h.deleted_at IS NULL AND h.time >= ?
-		WHERE u.allow_public_stats_lookup = 1
-		GROUP BY u.id
-		ORDER BY SUM(h.human_seconds) DESC, u.created_at DESC
-		LIMIT 50`, since)
-	if rows != nil {
-		for rows.Next() {
-			var lr leaderRow
-			if rows.Scan(&lr.Username, &lr.DisplayName, &lr.HumanSeconds, &lr.AgentSeconds, &lr.AvgStruggle, &lr.ProjectCount) == nil {
-				users = append(users, lr)
-			}
-		}
-		_ = rows.Close()
-	}
+	_ = a.Convex.Query(r.Context(), "stats:leaderboard", map[string]any{
+		"since_day": utcDay(time.Now().AddDate(0, 0, -days)), "limit": 50,
+	}, &users)
 	WriteJSON(w, http.StatusOK, map[string]any{"window_days": days, "users": users})
 }
 
@@ -293,9 +246,9 @@ func (a *App) HandleSummary(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid date range"})
 		return
 	}
-	var userID int64
+	userID := ""
 	if uname := q.Get("user"); uname != "" {
-		target := a.LoadUserByUsernameOrID(uname)
+		target := a.LoadUser(r.Context(), uname)
 		if target == nil {
 			WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 			return
@@ -303,30 +256,20 @@ func (a *App) HandleSummary(w http.ResponseWriter, r *http.Request) {
 		userID = target.ID
 	}
 
-	projTotals := make(map[string]int)
-	rows, _ := a.DB.Query(`
-		SELECT project, COALESCE(SUM(human_seconds),0)
-		FROM heartbeats
-		WHERE deleted_at IS NULL AND time >= ? AND time <= ? AND LOWER(category) != 'agent_working'
-		  AND (? = 0 OR user_id = ?)
-		GROUP BY project`, float64(from.Unix()), float64(to.Unix()), userID, userID)
-	if rows != nil {
-		for rows.Next() {
-			var p string
-			var sec int
-			if rows.Scan(&p, &sec) == nil {
-				if p == "" {
-					p = "Other"
-				}
-				projTotals[p] = sec
-			}
+	projTotals := map[string]int64{}
+	for _, row := range a.rollups(r.Context(), userID, utcDay(from), utcDay(to)) {
+		if row.Category == "agent_working" {
+			continue
 		}
-		_ = rows.Close()
+		p := row.Project
+		if p == "" {
+			p = "Other"
+		}
+		projTotals[p] += int64(row.HumanSeconds)
 	}
-
 	var statsSlice []services.CategoryStat
 	for name, sec := range projTotals {
-		statsSlice = append(statsSlice, services.CategoryStat{Name: name, TotalSeconds: int64(sec)})
+		statsSlice = append(statsSlice, services.CategoryStat{Name: name, TotalSeconds: sec})
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]any{

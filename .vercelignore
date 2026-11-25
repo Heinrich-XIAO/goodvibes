@@ -13,3 +13,6 @@ node_modules/
 /tmp/
 /log/
 /storage/
+/convex/
+/package.json
+/package-lock.json

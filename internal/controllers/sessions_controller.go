@@ -3,6 +3,7 @@ package controllers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -149,13 +150,13 @@ func (a *App) HandleHackClubCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := a.upsertHackClubUser(meData.Identity)
+	user, err := a.upsertHackClubUser(r.Context(), meData.Identity)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	sessToken, err := a.CreateSession(user.ID)
+	sessToken, err := a.CreateSession(r.Context(), user.ID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "create session failed"})
 		return
@@ -181,7 +182,7 @@ func (a *App) HandleHackClubCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/u/"+url.PathEscape(user.Username), http.StatusFound)
 }
 
-func (a *App) upsertHackClubUser(ident hackClubIdentity) (*models.User, error) {
+func (a *App) upsertHackClubUser(ctx context.Context, ident hackClubIdentity) (*models.User, error) {
 	email := strings.ToLower(strings.TrimSpace(ident.PrimaryEmail))
 	displayName := strings.TrimSpace(ident.FirstName + " " + ident.LastName)
 	if displayName == "" && email != "" {
@@ -191,31 +192,12 @@ func (a *App) upsertHackClubUser(ident hackClubIdentity) (*models.User, error) {
 		displayName = ident.ID
 	}
 
-	yswsInt := 0
-	if ident.YSWSEligible {
-		yswsInt = 1
-	}
-
 	adminLevel := 0
 	for _, e := range strings.Split(os.Getenv("REVIEWER_EMAILS"), ",") {
 		if strings.ToLower(strings.TrimSpace(e)) == email && email != "" {
 			adminLevel = int(models.AdminLevelSuperadmin)
 			break
 		}
-	}
-
-	var existingID int64
-	err := a.DB.QueryRow("SELECT id FROM users WHERE hackclub_id = ?", ident.ID).Scan(&existingID)
-	if err == nil {
-		_, err = a.DB.Exec(`
-			UPDATE users
-			SET display_name = ?, slack_uid = CASE WHEN ? != '' THEN ? ELSE slack_uid END,
-			    verification_status = ?, ysws_eligible = ?, admin_level = MAX(admin_level, ?),
-			    updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			displayName, ident.SlackID, ident.SlackID, ident.VerificationStatus, yswsInt, adminLevel, existingID,
-		)
-		return a.LoadUserByID(existingID), err
 	}
 
 	base := displayName
@@ -233,39 +215,27 @@ func (a *App) upsertHackClubUser(ident hackClubIdentity) (*models.User, error) {
 		}
 	}
 
-	username := base
-	for i := 1; ; i++ {
-		var tmp int64
-		if err := a.DB.QueryRow("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", username).Scan(&tmp); err != nil {
-			break
-		}
-		username = fmt.Sprintf("%s%d", base, i)
+	var u *models.User
+	err := a.Convex.Mutation(ctx, "users:upsertHackClub", map[string]any{
+		"hackclub_id":         ident.ID,
+		"email":               email,
+		"display_name":        displayName,
+		"slack_uid":           ident.SlackID,
+		"verification_status": ident.VerificationStatus,
+		"ysws_eligible":       ident.YSWSEligible,
+		"admin_level":         adminLevel,
+		"username_base":       base,
+		"api_key":             GenerateAPIKeyToken(),
+	}, &u)
+	if err == nil && u == nil {
+		err = fmt.Errorf("upsert returned no user")
 	}
-
-	var slackPtr any = nil
-	if ident.SlackID != "" {
-		slackPtr = ident.SlackID
-	}
-	res, err := a.DB.Exec(`
-		INSERT INTO users (hackclub_id, slack_uid, username, display_name, verification_status, ysws_eligible, allow_public_stats_lookup, admin_level)
-		VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-		ident.ID, slackPtr, username, displayName, ident.VerificationStatus, yswsInt, adminLevel,
-	)
-	if err != nil {
-		return nil, err
-	}
-	uid, _ := res.LastInsertId()
-	if email != "" {
-		_, _ = a.DB.Exec("INSERT OR IGNORE INTO email_addresses (email, user_id, source) VALUES (?, ?, 0)", email, uid)
-	}
-	// Mint default WakaTime / GoodVibes API key
-	_, _ = a.DB.Exec("INSERT INTO api_keys (user_id, name, token) VALUES (?, 'default', ?)", uid, GenerateAPIKeyToken())
-	return a.LoadUserByID(uid), nil
+	return u, err
 }
 
 func (a *App) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("gv_session"); err == nil && c.Value != "" {
-		_, _ = a.DB.Exec("DELETE FROM sessions WHERE token = ?", c.Value)
+		_ = a.Convex.Mutation(r.Context(), "users:deleteSession", map[string]any{"token": c.Value}, nil)
 	}
 	http.SetCookie(w, &http.Cookie{Name: "gv_session", Value: "", Path: "/", HttpOnly: true, MaxAge: -1})
 	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -296,7 +266,7 @@ func (a *App) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		name = fmt.Sprintf("key-%d", time.Now().Unix())
 	}
 	tok := GenerateAPIKeyToken()
-	_, err := a.DB.Exec("INSERT INTO api_keys (user_id, name, token) VALUES (?, ?, ?)", u.ID, name, tok)
+	err := a.Convex.Mutation(r.Context(), "users:createApiKey", map[string]any{"user_id": u.ID, "name": name, "token": tok}, nil)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -319,18 +289,20 @@ func (a *App) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	patch := map[string]any{"user_id": u.ID}
 	if body.AllowPublicStatsLookup != nil {
-		v := 0
-		if *body.AllowPublicStatsLookup {
-			v = 1
-		}
-		_, _ = a.DB.Exec("UPDATE users SET allow_public_stats_lookup = ? WHERE id = ?", v, u.ID)
+		patch["allow_public_stats_lookup"] = *body.AllowPublicStatsLookup
 	}
 	if body.Bio != nil {
-		_, _ = a.DB.Exec("UPDATE users SET bio = ? WHERE id = ?", *body.Bio, u.ID)
+		patch["bio"] = *body.Bio
 	}
 	if body.Timezone != nil && *body.Timezone != "" {
-		_, _ = a.DB.Exec("UPDATE users SET timezone = ? WHERE id = ?", *body.Timezone, u.ID)
+		patch["timezone"] = *body.Timezone
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"user": a.LoadUserByID(u.ID)})
+	var updated *models.User
+	if err := a.Convex.Mutation(r.Context(), "users:updateSettings", patch, &updated); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"user": updated})
 }

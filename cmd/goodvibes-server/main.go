@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hackclub/goodvibes/internal/db"
+	"github.com/hackclub/goodvibes/internal/convex"
 	"github.com/hackclub/goodvibes/internal/server"
 )
 
@@ -38,19 +38,15 @@ func loadDotEnv(path string) {
 }
 
 func main() {
+	loadDotEnv(".env.local")
 	loadDotEnv(".env")
 
-	dbPath := os.Getenv("GOODVIBES_DB")
-	if dbPath == "" {
-		dbPath = "data/goodvibes.db"
-	}
-	conn, err := db.Open(dbPath)
+	cx, err := convex.FromEnv()
 	if err != nil {
-		log.Fatalf("open db: %v", err)
+		log.Fatalf("convex: %v", err)
 	}
-	defer conn.Close()
 
-	handler, _ := server.NewRouter(conn)
+	handler, _ := server.NewRouter(cx)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
@@ -60,6 +56,6 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("goodvibes-go (Hackatime Go port) listening on http://localhost:%s (db: %s)", port, dbPath)
+	log.Printf("goodvibes-go listening on http://localhost:%s (convex: %s)", port, os.Getenv("CONVEX_URL"))
 	log.Fatal(srv.ListenAndServe())
 }

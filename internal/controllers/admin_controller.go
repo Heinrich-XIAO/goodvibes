@@ -4,7 +4,6 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,26 +41,37 @@ func (a *App) HandleCreateSubmission(w http.ResponseWriter, r *http.Request) {
 		prog = "YSWS"
 	}
 
-	report := audit.VerifyBundle(a.DB, u.ID, proj, body.Bundle)
+	var matched int
+	if err := a.Convex.Query(r.Context(), "heartbeats:countEvidence", map[string]any{
+		"user_id": u.ID, "hashes": audit.EvidenceHashes(body.Bundle),
+	}, &matched); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	report := audit.VerifyBundle(proj, body.Bundle, matched)
 	bundleJSON, _ := json.Marshal(body.Bundle)
 	verifyJSON, _ := json.Marshal(report)
-	now := time.Now().Unix()
 
-	res, err := a.DB.Exec(`
-		INSERT INTO audit_submissions (
-			user_id, project_name, program, status, claimed_human_seconds, excluded_agent_seconds,
-			avg_struggle_score, chain_valid, matched_heartbeats, total_bundle_entries,
-			trust_score, notes, bundle_json, verification_json, created_at
-		) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, proj, prog, report.ClaimedHumanSeconds, report.ExcludedAgentSeconds,
-		report.AvgStruggleScore, boolToInt(report.ChainValid), report.MatchedHeartbeats,
-		report.TotalEntries, report.TrustScore, body.Notes, string(bundleJSON), string(verifyJSON), now,
-	)
+	var id string
+	err := a.Convex.Mutation(r.Context(), "submissions:create", map[string]any{
+		"user_id":                u.ID,
+		"project_name":           proj,
+		"program":                prog,
+		"claimed_human_seconds":  report.ClaimedHumanSeconds,
+		"excluded_agent_seconds": report.ExcludedAgentSeconds,
+		"avg_struggle_score":     report.AvgStruggleScore,
+		"chain_valid":            report.ChainValid,
+		"matched_heartbeats":     report.MatchedHeartbeats,
+		"total_bundle_entries":   report.TotalEntries,
+		"trust_score":            report.TrustScore,
+		"notes":                  body.Notes,
+		"bundle_json":            string(bundleJSON),
+		"verification_json":      string(verifyJSON),
+	}, &id)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteJSON(w, http.StatusCreated, map[string]any{
 		"id":           id,
 		"status":       "pending",
@@ -72,65 +82,28 @@ func (a *App) HandleCreateSubmission(w http.ResponseWriter, r *http.Request) {
 // HandleListSubmissions handles GET /api/v1/submissions.
 func (a *App) HandleListSubmissions(w http.ResponseWriter, r *http.Request) {
 	subs := []models.AuditSubmission{}
-	rows, _ := a.DB.Query(`
-		SELECT s.id, s.user_id, u.username, u.display_name, s.project_name, s.program, s.status,
-		       s.claimed_human_seconds, s.approved_human_seconds, s.excluded_agent_seconds,
-		       s.avg_struggle_score, s.chain_valid, s.matched_heartbeats, s.total_bundle_entries,
-		       s.trust_score, s.notes, s.reviewer_notes, s.created_at, s.reviewed_at
-		FROM audit_submissions s JOIN users u ON u.id = s.user_id
-		ORDER BY s.created_at DESC LIMIT 100`)
-	if rows != nil {
-		for rows.Next() {
-			var s models.AuditSubmission
-			var cv int
-			if rows.Scan(
-				&s.ID, &s.UserID, &s.Username, &s.DisplayName, &s.ProjectName, &s.Program, &s.Status,
-				&s.ClaimedHumanSeconds, &s.ApprovedHumanSeconds, &s.ExcludedAgentSeconds,
-				&s.AvgStruggleScore, &cv, &s.MatchedHeartbeats, &s.TotalBundleEntries,
-				&s.TrustScore, &s.Notes, &s.ReviewerNotes, &s.CreatedAt, &s.ReviewedAt,
-			) == nil {
-				s.ChainValid = cv != 0
-				subs = append(subs, s)
-			}
-		}
-		_ = rows.Close()
+	if err := a.Convex.Query(r.Context(), "submissions:list", map[string]any{"limit": 100}, &subs); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"submissions": subs})
 }
 
 // HandleGetSubmission handles GET /api/v1/submissions/{id}.
 func (a *App) HandleGetSubmission(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
-		return
+	var s *struct {
+		models.AuditSubmission
+		BundleJSON       string `json:"bundle_json"`
+		VerificationJSON string `json:"verification_json"`
 	}
-	var s models.AuditSubmission
-	var cv int
-	var bJSON, vJSON string
-	err = a.DB.QueryRow(`
-		SELECT s.id, s.user_id, u.username, u.display_name, s.project_name, s.program, s.status,
-		       s.claimed_human_seconds, s.approved_human_seconds, s.excluded_agent_seconds,
-		       s.avg_struggle_score, s.chain_valid, s.matched_heartbeats, s.total_bundle_entries,
-		       s.trust_score, s.notes, s.reviewer_notes, s.created_at, s.reviewed_at,
-		       s.bundle_json, s.verification_json
-		FROM audit_submissions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = ?`, id).Scan(
-		&s.ID, &s.UserID, &s.Username, &s.DisplayName, &s.ProjectName, &s.Program, &s.Status,
-		&s.ClaimedHumanSeconds, &s.ApprovedHumanSeconds, &s.ExcludedAgentSeconds,
-		&s.AvgStruggleScore, &cv, &s.MatchedHeartbeats, &s.TotalBundleEntries,
-		&s.TrustScore, &s.Notes, &s.ReviewerNotes, &s.CreatedAt, &s.ReviewedAt,
-		&bJSON, &vJSON,
-	)
-	if err != nil {
+	if err := a.Convex.Query(r.Context(), "submissions:get", map[string]any{"id": r.PathValue("id")}, &s); err != nil || s == nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Submission not found"})
 		return
 	}
-	s.ChainValid = cv != 0
 	var bundle any
 	var verify any
-	_ = json.Unmarshal([]byte(bJSON), &bundle)
-	_ = json.Unmarshal([]byte(vJSON), &verify)
+	_ = json.Unmarshal([]byte(s.BundleJSON), &bundle)
+	_ = json.Unmarshal([]byte(s.VerificationJSON), &verify)
 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"submission": map[string]any{
@@ -159,11 +132,7 @@ func (a *App) HandleReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "Reviewer permissions required"})
 		return
 	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
-		return
-	}
+	id := r.PathValue("id")
 	var body struct {
 		Status               string `json:"status"`
 		ApprovedHumanSeconds *int   `json:"approved_human_seconds"`
@@ -177,15 +146,23 @@ func (a *App) HandleReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be approved, deflated, or flagged"})
 		return
 	}
-	_, err = a.DB.Exec(`
-		UPDATE audit_submissions
-		SET status = ?, approved_human_seconds = COALESCE(?, claimed_human_seconds),
-		    reviewer_notes = ?, reviewed_by = ?, reviewed_at = ?
-		WHERE id = ?`,
-		body.Status, body.ApprovedHumanSeconds, body.ReviewerNotes, reviewer.ID, time.Now().Unix(), id,
-	)
-	if err != nil {
+	args := map[string]any{
+		"id":             id,
+		"status":         body.Status,
+		"reviewer_notes": body.ReviewerNotes,
+		"reviewed_by":    reviewer.ID,
+		"reviewed_at":    time.Now().Unix(),
+	}
+	if body.ApprovedHumanSeconds != nil {
+		args["approved_human_seconds"] = *body.ApprovedHumanSeconds
+	}
+	var found bool
+	if err := a.Convex.Mutation(r.Context(), "submissions:review", args, &found); err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !found {
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Submission not found"})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "status": body.Status})
@@ -199,7 +176,7 @@ func (a *App) HandleAdminConvict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		UserID     int64  `json:"user_id"`
+		UserID     string `json:"user_id"`
 		TrustLevel string `json:"trust_level"`
 		Reason     string `json:"reason"`
 		Notes      string `json:"notes"`
@@ -213,16 +190,22 @@ func (a *App) HandleAdminConvict(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid trust_level"})
 		return
 	}
-	target := a.LoadUserByID(body.UserID)
+	target := a.LoadUser(r.Context(), body.UserID)
 	if target == nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
-	_, _ = a.DB.Exec(`
-		INSERT INTO trust_level_audit_logs (user_id, changed_by_id, previous_trust_level, new_trust_level, reason, notes)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		target.ID, admin.ID, target.TrustLevel.String(), tl.String(), body.Reason, body.Notes,
-	)
-	_, _ = a.DB.Exec("UPDATE users SET trust_level = ? WHERE id = ?", int(tl), target.ID)
+	if err := a.Convex.Mutation(r.Context(), "users:setTrustLevel", map[string]any{
+		"user_id":              target.ID,
+		"changed_by_id":        admin.ID,
+		"previous_trust_level": target.TrustLevel.String(),
+		"new_trust_level":      tl.String(),
+		"trust_level":          int(tl),
+		"reason":               body.Reason,
+		"notes":                body.Notes,
+	}, nil); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user_id": target.ID, "trust_level": tl.String()})
 }

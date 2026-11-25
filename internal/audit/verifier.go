@@ -2,7 +2,6 @@
 package audit
 
 import (
-	"database/sql"
 	"math"
 	"strings"
 )
@@ -26,14 +25,14 @@ type BundleEntry struct {
 }
 
 type Bundle struct {
-	Version       string        `json:"version"`
-	GeneratedAt   int64         `json:"generated_at"`
-	Project       string        `json:"project"`
-	ChainValid    *bool         `json:"chain_valid,omitempty"`
-	EntryCount    int           `json:"entry_count"`
-	HumanSeconds  int           `json:"human_seconds"`
-	AgentSeconds  int           `json:"agent_seconds"`
-	Entries       []BundleEntry `json:"entries"`
+	Version      string        `json:"version"`
+	GeneratedAt  int64         `json:"generated_at"`
+	Project      string        `json:"project"`
+	ChainValid   *bool         `json:"chain_valid,omitempty"`
+	EntryCount   int           `json:"entry_count"`
+	HumanSeconds int           `json:"human_seconds"`
+	AgentSeconds int           `json:"agent_seconds"`
+	Entries      []BundleEntry `json:"entries"`
 }
 
 type VerificationReport struct {
@@ -60,15 +59,26 @@ func isBillable(cat string) bool {
 	}
 }
 
-// VerifyBundle validates a submitted local-vault AuditBundle against the
-// server's recorded heartbeats (`evidence_hash`) for YSWS / Fraud Squad review.
-func VerifyBundle(conn *sql.DB, userID int64, project string, bundle Bundle) VerificationReport {
+// EvidenceHashes lists the entry hashes to look up among the server's heartbeats.
+func EvidenceHashes(bundle Bundle) []string {
+	hashes := []string{}
+	for _, e := range bundle.Entries {
+		if e.Hash != "" {
+			hashes = append(hashes, e.Hash)
+		}
+	}
+	return hashes
+}
+
+// VerifyBundle scores a submitted local-vault AuditBundle for YSWS / Fraud Squad
+// review, given how many of its EvidenceHashes match recorded heartbeats.
+func VerifyBundle(project string, bundle Bundle, matched int) VerificationReport {
 	chainValid := true
 	if bundle.ChainValid != nil && !*bundle.ChainValid {
 		chainValid = false
 	}
 
-	var humanSec, agentSec, lowEffort, scoreSum, scoreCount, matched int
+	var humanSec, agentSec, lowEffort, scoreSum, scoreCount int
 	flagCounts := make(map[string]int)
 
 	for _, e := range bundle.Entries {
@@ -90,16 +100,6 @@ func VerifyBundle(conn *sql.DB, userID int64, project string, bundle Bundle) Ver
 			flagCounts[f]++
 			if f == "low_effort_prompt" || f == "long_unsubmitted_block" || f == "no_verification_yet" {
 				lowEffort++
-			}
-		}
-		if e.Hash != "" && conn != nil {
-			var id int64
-			err := conn.QueryRow(
-				"SELECT id FROM heartbeats WHERE user_id = ? AND evidence_hash = ? AND deleted_at IS NULL LIMIT 1",
-				userID, e.Hash,
-			).Scan(&id)
-			if err == nil {
-				matched++
 			}
 		}
 	}

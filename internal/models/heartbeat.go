@@ -97,32 +97,31 @@ const (
 
 // Heartbeat mirrors app/models/heartbeat.rb + GoodVibes vibecoding fields.
 type Heartbeat struct {
-	ID                   int64       `json:"id"`
-	UserID               int64       `json:"user_id"`
-	Branch               string      `json:"branch"`
-	Category             string      `json:"category"`
-	Dependencies         string      `json:"dependencies,omitempty"`
-	Editor               string      `json:"editor"`
-	Entity               string      `json:"entity"`
-	Language             string      `json:"language"`
-	Machine              string      `json:"machine"`
-	OperatingSystem      string      `json:"operating_system"`
-	Project              string      `json:"project"`
-	Type                 string      `json:"type"`
-	UserAgent            string      `json:"user_agent"`
-	LineAdditions        int         `json:"line_additions"`
-	LineDeletions        int         `json:"line_deletions"`
-	Lineno               int         `json:"lineno"`
-	Lines                int         `json:"lines"`
-	CursorPos            int         `json:"cursorpos"`
-	ProjectRootCount     int         `json:"project_root_count"`
-	Time                 float64     `json:"time"`
-	IsWrite              bool        `json:"is_write"`
-	FieldsHash           string      `json:"fields_hash,omitempty"`
-	SourceType           SourceType  `json:"source_type"`
-	IPAddress            string      `json:"ip_address,omitempty"`
-	YSWSProgram          YSWSProgram `json:"ysws_program"`
-	RawHeartbeatUploadID *int64      `json:"raw_heartbeat_upload_id,omitempty"`
+	ID               string      `json:"id,omitempty"`
+	UserID           string      `json:"user_id"`
+	Branch           string      `json:"branch"`
+	Category         string      `json:"category"`
+	Dependencies     string      `json:"-"`
+	Editor           string      `json:"editor"`
+	Entity           string      `json:"entity"`
+	Language         string      `json:"language"`
+	Machine          string      `json:"machine"`
+	OperatingSystem  string      `json:"operating_system"`
+	Project          string      `json:"project"`
+	Type             string      `json:"type"`
+	UserAgent        string      `json:"user_agent"`
+	LineAdditions    int         `json:"line_additions"`
+	LineDeletions    int         `json:"line_deletions"`
+	Lineno           int         `json:"lineno"`
+	Lines            int         `json:"lines"`
+	CursorPos        int         `json:"cursorpos"`
+	ProjectRootCount int         `json:"project_root_count"`
+	Time             float64     `json:"time"`
+	IsWrite          bool        `json:"is_write"`
+	FieldsHash       string      `json:"fields_hash"`
+	SourceType       SourceType  `json:"source_type"`
+	IPAddress        string      `json:"ip_address"`
+	YSWSProgram      YSWSProgram `json:"ysws_program"`
 	// GoodVibes productive-struggle extensions:
 	HumanSeconds    int    `json:"human_seconds"`
 	AgentSeconds    int    `json:"agent_seconds"`

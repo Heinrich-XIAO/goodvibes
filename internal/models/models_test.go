@@ -40,7 +40,7 @@ func TestHeartbeatHashingAndAgentExclusion(t *testing.T) {
 		t.Fatalf("expected prompt_typing, prompt_vtt, and coding to be billable")
 	}
 
-	hb := &Heartbeat{UserID: 1, Project: "cs2-browser", Category: "prompt_typing", Time: 1700000000}
+	hb := &Heartbeat{UserID: "u1", Project: "cs2-browser", Category: "prompt_typing", Time: 1700000000}
 	h1 := GenerateFieldsHash(hb)
 	h2 := GenerateFieldsHash(hb)
 	if len(h1) != 32 || h1 != h2 {

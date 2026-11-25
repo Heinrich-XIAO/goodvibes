@@ -9,11 +9,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/hackclub/goodvibes/internal/db"
+	"github.com/hackclub/goodvibes/internal/controllers"
+	"github.com/hackclub/goodvibes/internal/convex"
 	"github.com/hackclub/goodvibes/internal/server"
 )
 
@@ -26,13 +26,18 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 	t.Setenv("HACKCLUB_CLIENT_SECRET", "test_csec")
 	t.Setenv("HACKCLUB_REDIRECT_URI", "http://localhost:3000/oauth/callback")
 
-	conn, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
+	if os.Getenv("GOODVIBES_E2E") != "1" {
+		t.Skip("set GOODVIBES_E2E=1 to run against the Convex deployment in .env.local (it writes real rows)")
 	}
-	defer conn.Close()
+	loadDotEnv("../../.env.local")
+	cx, err := convex.FromEnv()
+	if err != nil {
+		t.Skipf("needs a Convex dev deployment: %v", err)
+	}
+	run := controllers.RandomHex(4)
+	username := "rowan" + run
 
-	router, app := server.NewRouter(conn)
+	router, app := server.NewRouter(cx)
 	app.HTTPClient = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
@@ -48,11 +53,11 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
 					Body: io.NopCloser(strings.NewReader(`{
 						"identity": {
-							"id": "ident!go999",
+							"id": "ident!go` + run + `",
 							"first_name": "Rowan",
 							"last_name": "Go",
-							"primary_email": "rowan@hackclub.com",
-							"slack_id": "U000099",
+							"primary_email": "` + username + `@hackclub.com",
+							"slack_id": "U` + run + `",
 							"verification_status": "verified",
 							"ysws_eligible": true
 						}
@@ -84,8 +89,9 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 		cbReq.AddCookie(c)
 	}
 	res2, err := noRedirect.Do(cbReq)
-	if err != nil || res2.StatusCode != 302 || res2.Header.Get("Location") != "/u/rowan" {
-		t.Fatalf("expected redirect to /u/rowan, got status=%d loc=%q err=%v", res2.StatusCode, res2.Header.Get("Location"), err)
+	if err != nil || res2.StatusCode != 302 || res2.Header.Get("Location") != "/u/"+username {
+		body, _ := io.ReadAll(res2.Body)
+		t.Fatalf("expected redirect to /u/%s, got status=%d loc=%q err=%v body=%s", username, res2.StatusCode, res2.Header.Get("Location"), err, body)
 	}
 	var sessionCookie *http.Cookie
 	for _, c := range res2.Cookies() {
@@ -112,7 +118,7 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 	// 4. Push heartbeats (60s prompt_typing, 40s prompt_vtt, 300s agent_working which MUST be excluded!)
 	hbBody := `{
 		"heartbeats": [
-			{"project":"cs2-browser","category":"prompt_typing","human_seconds":60,"harness":"t3-code","struggle_score":88,"evidence_hash":"aaaa1111bbbb2222cccc3333dddd4444"},
+			{"project":"cs2-browser","category":"prompt_typing","human_seconds":60,"harness":"t3-code","struggle_score":88,"evidence_hash":"aaaa1111bbbb2222cccc3333dddd` + run + `"},
 			{"project":"cs2-browser","category":"prompt_vtt","human_seconds":40,"harness":"whisperflow","struggle_score":86,"evidence_hash":"eeee5555ffff6666aaaa7777bbbb8888"},
 			{"project":"cs2-browser","category":"agent_working","human_seconds":300,"agent_seconds":300,"harness":"t3-code","evidence_hash":"cccc9999dddd0000eeee1111ffff2222"}
 		]
@@ -125,7 +131,7 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 	}
 
 	// 5. Verify stats: 100s human, 300s excluded agent
-	res5, err := http.Get(ts.URL + "/api/v1/users/rowan/stats")
+	res5, err := http.Get(ts.URL + "/api/v1/users/" + username + "/stats")
 	if err != nil || res5.StatusCode != 200 {
 		t.Fatalf("expected 200 from stats, got %v %v", res5, err)
 	}
@@ -149,7 +155,7 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 		"bundle": {
 			"chain_valid": true,
 			"entries": [
-				{"seq":1,"category":"prompt_typing","duration_sec":60,"struggle_score":88,"hash":"aaaa1111bbbb2222cccc3333dddd4444"},
+				{"seq":1,"category":"prompt_typing","duration_sec":60,"struggle_score":88,"hash":"aaaa1111bbbb2222cccc3333dddd` + run + `"},
 				{"seq":2,"category":"prompt_vtt","duration_sec":40,"struggle_score":86,"hash":"eeee5555ffff6666aaaa7777bbbb8888"},
 				{"seq":3,"category":"agent_working","duration_sec":300,"agent_sec":300,"struggle_score":0,"hash":"cccc9999dddd0000eeee1111ffff2222"}
 			]
@@ -173,5 +179,4 @@ func TestEndToEndGoHackatimePort(t *testing.T) {
 	if subResp.Verification.HeartbeatMatchRate != 100 || subResp.Verification.ClaimedHumanSeconds != 100 || subResp.Verification.ExcludedAgentSeconds != 300 {
 		t.Fatalf("unexpected verification report: %+v", subResp.Verification)
 	}
-	_ = os.Stdout
 }

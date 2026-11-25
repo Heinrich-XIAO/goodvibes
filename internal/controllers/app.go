@@ -2,19 +2,19 @@
 package controllers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/hackclub/goodvibes/internal/convex"
 	"github.com/hackclub/goodvibes/internal/models"
 	"github.com/hackclub/goodvibes/internal/realtime"
 )
@@ -27,14 +27,14 @@ const (
 
 // App holds shared dependencies across all ported Hackatime/GoodVibes controllers.
 type App struct {
-	DB         *sql.DB
+	Convex     *convex.Client
 	Hub        *realtime.Hub
 	HTTPClient *http.Client
 }
 
-func NewApp(conn *sql.DB, hub *realtime.Hub) *App {
+func NewApp(cx *convex.Client, hub *realtime.Hub) *App {
 	return &App{
-		DB:         conn,
+		Convex:     cx,
 		Hub:        hub,
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 	}
@@ -143,79 +143,36 @@ func (a *App) CurrentUser(r *http.Request) *models.User {
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("api_key"))
 	}
-	if token != "" {
-		var uid int64
-		err := a.DB.QueryRow("SELECT user_id FROM api_keys WHERE token = ? LIMIT 1", token).Scan(&uid)
-		if err == nil {
-			return a.LoadUserByID(uid)
-		}
+	session := ""
+	if c, err := r.Cookie("gv_session"); err == nil {
+		session = c.Value
 	}
-
-	// 2. Browser session cookie
-	cookie, err := r.Cookie("gv_session")
-	if err != nil || cookie.Value == "" {
+	if token == "" && session == "" {
 		return nil
 	}
-	var uid int64
-	now := time.Now().Unix()
-	err = a.DB.QueryRow("SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?", cookie.Value, now).Scan(&uid)
+	var u *models.User
+	err := a.Convex.Query(r.Context(), "users:current", map[string]any{
+		"api_key": token, "session_token": session, "now": time.Now().Unix(),
+	}, &u)
 	if err != nil {
 		return nil
 	}
-	return a.LoadUserByID(uid)
+	return u
 }
 
-func (a *App) LoadUserByID(id int64) *models.User {
-	return a.scanUser(a.DB.QueryRow(`
-		SELECT id, COALESCE(hackclub_id,''), COALESCE(username,''), COALESCE(display_name,''),
-		       COALESCE(slack_uid,''), COALESCE(github_uid,''), COALESCE(github_username,''),
-		       COALESCE(timezone,'UTC'), COALESCE(country_code,''), COALESCE(verification_status,''),
-		       ysws_eligible, COALESCE(bio,''), allow_public_stats_lookup, default_timezone_leaderboard,
-		       trust_level, admin_level, hackatime_extension_text_type
-		FROM users WHERE id = ?`, id))
-}
-
-func (a *App) LoadUserByUsernameOrID(ident string) *models.User {
-	return a.scanUser(a.DB.QueryRow(`
-		SELECT id, COALESCE(hackclub_id,''), COALESCE(username,''), COALESCE(display_name,''),
-		       COALESCE(slack_uid,''), COALESCE(github_uid,''), COALESCE(github_username,''),
-		       COALESCE(timezone,'UTC'), COALESCE(country_code,''), COALESCE(verification_status,''),
-		       ysws_eligible, COALESCE(bio,''), allow_public_stats_lookup, default_timezone_leaderboard,
-		       trust_level, admin_level, hackatime_extension_text_type
-		FROM users WHERE LOWER(username) = LOWER(?) OR slack_uid = ? OR CAST(id AS TEXT) = ? LIMIT 1`,
-		ident, ident, ident))
-}
-
-func (a *App) scanUser(row *sql.Row) *models.User {
-	var u models.User
-	var ysws, pub, tzLead int
-	var tl, al, ext int
-	err := row.Scan(
-		&u.ID, &u.HackClubID, &u.Username, &u.DisplayName,
-		&u.SlackUID, &u.GithubUID, &u.GithubUsername,
-		&u.Timezone, &u.CountryCode, &u.VerificationStatus,
-		&ysws, &u.Bio, &pub, &tzLead, &tl, &al, &ext,
-	)
-	if err != nil {
+// LoadUser finds a user by username (case-insensitive), Slack ID, or Convex ID.
+func (a *App) LoadUser(ctx context.Context, ident string) *models.User {
+	var u *models.User
+	if err := a.Convex.Query(ctx, "users:get", map[string]any{"ident": ident}, &u); err != nil {
 		return nil
 	}
-	u.YSWSEligible = ysws != 0
-	u.AllowPublicStatsLookup = pub != 0
-	u.DefaultTimezoneLeaderboard = tzLead != 0
-	u.TrustLevel = models.TrustLevel(tl)
-	u.AdminLevel = models.AdminLevel(al)
-	u.HackatimeExtensionTextType = models.HackatimeExtensionTextType(ext)
-	return &u
+	return u
 }
 
-func (a *App) CreateSession(userID int64) (string, error) {
+func (a *App) CreateSession(ctx context.Context, userID string) (string, error) {
 	tok := RandomHex(32)
-	now := time.Now().Unix()
-	_, err := a.DB.Exec(
-		"INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-		tok, userID, now, now+int64(SessionTTL.Seconds()),
-	)
+	err := a.Convex.Mutation(ctx, "users:createSession", map[string]any{
+		"user_id": userID, "token": tok, "expires_at": time.Now().Add(SessionTTL).Unix(),
+	}, nil)
 	return tok, err
 }
-
-func ErrNotFound() error { return errors.New("not found") }
