@@ -215,13 +215,13 @@
       <div class="two-col">
         <div class="card">
           <h2>1. Install Local Daemon</h2>
-          <p class="muted-sm">Single static Go binary (~9.5 MB, &lt;12 MB RAM) for Windows, macOS, and Linux.</p>
+          <p class="muted-sm">One command installs the daemon, logs you in, and starts tracking. Works on Windows, macOS, and Linux.</p>
           <pre class="code-block"><code id="setup-cli-snippet"></code></pre>
           <h3 style="margin-top:16px">2. Wrap Any CLI Agent (Agent Time Excluded)</h3>
-          <pre class="code-block"><code>./goodvibes wrap --harness claude-code -- claude -p
-./goodvibes wrap --harness codex --mode prompt_vtt -- codex</code></pre>
+          <pre class="code-block"><code>goodvibes wrap --harness claude-code -- claude -p
+goodvibes wrap --harness codex --mode prompt_vtt -- codex</code></pre>
           <h3 style="margin-top:16px">3. Submit Verifiable Audit Bundle</h3>
-          <pre class="code-block"><code>./goodvibes bundle --project MY_PROJECT --program "YSWS" --upload</code></pre>
+          <pre class="code-block"><code>goodvibes bundle --project MY_PROJECT --program "YSWS" --upload</code></pre>
         </div>
 
         <div class="card">

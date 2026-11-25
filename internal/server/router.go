@@ -33,6 +33,10 @@ func NewRouter(cx *convex.Client) (http.Handler, *controllers.App) {
 	mux.HandleFunc("GET /up", healthHandler)
 	mux.HandleFunc("GET /api/v1/health", healthHandler)
 
+	// One-command daemon install (origin is baked into each script)
+	mux.Handle("GET /install.sh", app.HandleInstaller("install.sh", "text/x-shellscript; charset=utf-8"))
+	mux.Handle("GET /install.ps1", app.HandleInstaller("install.ps1", "text/plain; charset=utf-8"))
+
 	// Hack Club Auth OAuth 2.0
 	mux.HandleFunc("GET /api/v1/auth/hackclub", app.HandleHackClubAuthStart)
 	mux.HandleFunc("GET /oauth/callback", app.HandleHackClubCallback)

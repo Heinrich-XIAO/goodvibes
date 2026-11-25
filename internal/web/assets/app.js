@@ -157,7 +157,7 @@ async function openSubmissionDetail(id) {
 
 function renderSetupAccount() {
   const snippet = document.getElementById('setup-cli-snippet');
-  if (snippet) snippet.textContent = `cd daemon && go build -o goodvibes ./cmd/goodvibes\n./goodvibes login --server ${location.origin} --api-key YOUR_API_KEY\n./goodvibes daemon`;
+  if (snippet) snippet.textContent = `# macOS / Linux\ncurl -fsSL ${location.origin}/install.sh | sh -s -- YOUR_API_KEY\n\n# Windows (PowerShell)\n$env:GOODVIBES_API_KEY = "YOUR_API_KEY"; irm ${location.origin}/install.ps1 | iex`;
   const box = document.getElementById('setup-account-box');
   if (!state.me) {
     box.innerHTML = `<p class="muted-sm">Sign in with Hack Club Auth to generate API keys.</p><a class="btn btn-primary btn-sm" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>`;
