@@ -3,63 +3,68 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GoodVibes — Hack Club</title>
+  <meta name="color-scheme" content="dark" />
+  <title>GoodVibes</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23ec3750'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/">
-        <span class="brand-dot"></span>
-        <span>goodvibes</span>
-        <span class="brand-tag">Go · AGPLv3</span>
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span>GoodVibes</span>
       </a>
-      <nav class="nav">
-        <button class="nav-btn active" data-view="profile">Dashboard</button>
-        <button class="nav-btn" data-view="leaderboard">Builders</button>
-        <button class="nav-btn" data-view="audit">Audit Portal</button>
-        <button class="nav-btn" data-view="setup">Setup &amp; Plugins</button>
+      <nav class="nav" aria-label="Main">
+        <button class="nav-btn active" type="button" data-view="profile" aria-current="page">Dashboard</button>
+        <button class="nav-btn" type="button" data-view="leaderboard">Builders</button>
+        <button class="nav-btn" type="button" data-view="audit">Audit portal</button>
+        <button class="nav-btn" type="button" data-view="setup">Setup &amp; plugins</button>
       </nav>
       <div class="auth-slot" id="auth-slot">
-        <a class="btn btn-sm btn-primary" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
+        <a class="btn btn-primary" id="topbar-signin" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
       </div>
     </div>
   </header>
 
-  <main class="container">
-    <div id="auth-banner" class="card hidden" style="margin-bottom:16px;border-color:var(--warn)"></div>
+  <main class="container" id="main-content" tabindex="-1">
+    <div id="auth-banner" class="card auth-banner hidden" role="status"></div>
+    <noscript><div class="card empty-state">GoodVibes needs JavaScript to load the dashboard, builders, and audit portal.</div></noscript>
 
     <section id="view-profile" class="view">
-      <div id="empty-app-state" class="card hidden">
+      <div id="profile-loading" class="card muted-sm" role="status">Loading profile…</div>
+
+      <div id="empty-app-state" class="card hidden" role="status">
         <div class="card-head">
           <div>
-            <h2>No builder data yet</h2>
-            <p class="muted-sm" id="empty-app-msg">Sign in with Hack Club Auth and connect the local daemon to start logging real productive struggle time.</p>
+            <h1 id="empty-app-title">No builder data yet</h1>
+            <p class="muted-sm" id="empty-app-msg"></p>
           </div>
-          <a class="btn btn-primary" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
+          <a id="empty-cta" class="btn btn-primary" href="/api/v1/auth/hackclub">Sign in with Hack Club</a>
         </div>
       </div>
 
       <div id="profile-content" class="view hidden">
         <div class="profile-header card">
           <div class="profile-identity">
-            <div class="avatar" id="profile-avatar">?</div>
+            <div class="avatar" id="profile-avatar" aria-hidden="true">?</div>
             <div>
               <div class="profile-name-row">
                 <h1 id="profile-display-name"></h1>
                 <span class="handle" id="profile-username"></span>
                 <span class="pill pill-blue hidden" id="profile-verified-badge">Hack Club Verified</span>
-                <span class="live-pill" id="live-pill">
-                  <span class="pulse-dot"></span>
-                  <span id="live-pill-text">Live</span>
+                <span class="live-pill is-offline" id="live-pill" role="status">
+                  <span class="pulse-dot" aria-hidden="true"></span>
+                  <span id="live-pill-text">Connecting</span>
                 </span>
               </div>
               <p class="bio" id="profile-bio"></p>
             </div>
           </div>
           <div class="profile-actions">
-            <select id="profile-switcher" class="select hidden"></select>
-            <select id="window-select" class="select">
+            <select id="profile-switcher" class="select hidden" aria-label="Builder profile"></select>
+            <select id="window-select" class="select" aria-label="Time window">
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90" selected>Last 90 days</option>
@@ -69,40 +74,40 @@
 
         <div class="kpi-grid">
           <div class="card kpi-card kpi-primary">
-            <div class="kpi-label">Productive Struggle Time</div>
+            <div class="kpi-label">Productive struggle time</div>
             <div class="kpi-value" id="kpi-human">0s</div>
             <div class="kpi-sub">Prompt typing + VTT + coding + review + testing</div>
           </div>
           <div class="card kpi-card">
-            <div class="kpi-label">Craft / Struggle Score</div>
+            <div class="kpi-label">Craft / struggle score</div>
             <div class="kpi-value" id="kpi-score">—</div>
-            <div class="kpi-sub">Measures spec depth &amp; verification vs. slop</div>
+            <div class="kpi-sub" id="kpi-score-sub">Measures spec depth &amp; verification vs. slop</div>
           </div>
           <div class="card kpi-card">
-            <div class="kpi-label">Build Streak</div>
+            <div class="kpi-label">Build streak</div>
             <div class="kpi-value" id="kpi-streak">0d</div>
             <div class="kpi-sub" id="kpi-streak-sub">Longest: 0d</div>
           </div>
           <div class="card kpi-card kpi-muted">
-            <div class="kpi-label">Agent Time (Excluded)</div>
+            <div class="kpi-label">Agent time (not counted)</div>
             <div class="kpi-value" id="kpi-agent">0s</div>
-            <div class="kpi-sub">Tracked transparently · 0% counted as human hours</div>
+            <div class="kpi-sub">Agent time never counts toward human totals.</div>
           </div>
         </div>
 
         <div class="two-col">
           <div class="card">
             <div class="card-head">
-              <h2>Craft Breakdown</h2>
+              <h2>Time by activity</h2>
               <span class="muted-sm">Active human effort by category</span>
             </div>
-            <div class="stacked-bar" id="craft-bar"></div>
+            <div class="stacked-bar" id="craft-bar" aria-hidden="true"></div>
             <div class="legend" id="craft-legend"></div>
           </div>
 
           <div class="card">
             <div class="card-head">
-              <h2>Projects &amp; Git</h2>
+              <h2>Projects &amp; git</h2>
               <span class="muted-sm">Auto-detected from git repos</span>
             </div>
             <div class="project-list" id="project-list"></div>
@@ -111,24 +116,33 @@
 
         <div class="card">
           <div class="card-head">
-            <h2>Real-Time Activity Stream</h2>
+            <div>
+              <h2>README badge</h2>
+              <p class="muted-sm">Paste this into your README to show your profile.</p>
+            </div>
             <div class="row-gap">
-              <span class="muted-sm">Live SSE updates</span>
-              <button class="btn btn-sm btn-ghost" id="copy-badge-btn">Copy README Badge</button>
+              <span class="muted-sm" id="copy-status" role="status"></span>
+              <button class="btn btn-sm btn-ghost" id="copy-badge-btn" type="button">Copy README badge</button>
             </div>
           </div>
           <div id="badge-preview" class="badge-preview"></div>
-          <div class="activity-table-wrap">
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Real-time activity stream</h2>
+          </div>
+          <div class="activity-table-wrap" tabindex="0" role="region" aria-label="Recent activity">
             <table class="table">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Project</th>
-                  <th>Category</th>
-                  <th>Human</th>
-                  <th>Agent (Excl.)</th>
-                  <th>Harness / Model</th>
-                  <th>Craft</th>
+                  <th scope="col">Time</th>
+                  <th scope="col">Project</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Human time</th>
+                  <th scope="col">Agent time (not counted)</th>
+                  <th scope="col">Harness / Editor</th>
+                  <th scope="col">Craft score</th>
                 </tr>
               </thead>
               <tbody id="activity-tbody"></tbody>
@@ -142,23 +156,25 @@
       <div class="card">
         <div class="card-head">
           <div>
-            <h2>Public Builders (Last 30 Days)</h2>
-            <p class="muted-sm">Public by default — toggle private anytime in Setup &amp; Plugins.</p>
+            <h1>Public builders (last 30 days)</h1>
+            <p class="muted-sm">Public by default. Toggle private anytime in Setup &amp; Plugins.</p>
           </div>
         </div>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Builder</th>
-              <th>Productive Struggle</th>
-              <th>Excluded Agent Time</th>
-              <th>Avg Craft</th>
-              <th>Projects</th>
-            </tr>
-          </thead>
-          <tbody id="leaderboard-tbody"></tbody>
-        </table>
+        <div class="activity-table-wrap" tabindex="0" role="region" aria-label="Public builders">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col" aria-label="Rank">#</th>
+                <th scope="col">Builder</th>
+                <th scope="col">Productive struggle time</th>
+                <th scope="col">Agent time (not counted)</th>
+                <th scope="col">Avg craft score</th>
+                <th scope="col">Projects</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -166,8 +182,8 @@
       <div class="card">
         <div class="card-head">
           <div>
-            <h2>Audit &amp; Verification Portal (YSWS / Fraud Squad)</h2>
-            <p class="muted-sm">Submitted Audit Bundles uploaded via <code>goodvibes bundle --upload</code> appear here.</p>
+            <h1>Audit &amp; verification portal (YSWS / Fraud Squad)</h1>
+            <p class="muted-sm">Submitted audit bundles uploaded via <code>goodvibes bundle --upload</code> appear here.</p>
           </div>
         </div>
         <div id="submissions-list" class="submissions-list"></div>
@@ -176,70 +192,88 @@
       <div id="submission-detail" class="card hidden">
         <div class="card-head">
           <div>
-            <h2 id="sub-detail-title">Audit Bundle Inspector</h2>
-            <p class="muted-sm" id="sub-detail-meta"></p>
+            <h2 id="sub-detail-title" tabindex="-1">Audit bundle inspector</h2>
+            <p class="muted-sm" id="sub-detail-meta" role="status"></p>
           </div>
-          <button class="btn btn-sm btn-ghost" id="close-sub-detail">Close</button>
+          <button class="btn btn-sm btn-ghost" id="close-sub-detail" type="button">Close</button>
         </div>
         <div id="sub-trust-grid" class="kpi-grid"></div>
         <div id="sub-review-controls" class="review-box hidden">
-          <h3>Reviewer Decision</h3>
-          <div class="row-gap">
-            <input type="number" id="review-approved-sec" class="input" placeholder="Approved human seconds" />
-            <input type="text" id="review-notes" class="input grow" placeholder="Reviewer notes" />
-            <button class="btn btn-success" data-decision="approved">Approve</button>
-            <button class="btn btn-warn" data-decision="deflated">Deflate</button>
-            <button class="btn btn-danger" data-decision="flagged">Flag</button>
+          <h3>Reviewer decision</h3>
+          <div class="review-row mt-16">
+            <label class="field-label">Approved human seconds
+              <input type="number" id="review-approved-sec" class="input" min="0" step="1" />
+              <span class="muted-sm" id="review-claimed-hint"></span>
+            </label>
+            <label class="field-label">Reviewer notes
+              <input type="text" id="review-notes" class="input" />
+            </label>
           </div>
+          <div class="review-row mt-16">
+            <button class="btn btn-success" type="button" data-decision="approved">Approve</button>
+            <button class="btn btn-warn" type="button" data-decision="deflated">Deflate</button>
+            <button class="btn btn-danger" type="button" data-decision="flagged">Flag</button>
+          </div>
+          <p class="muted-sm">Approve or deflate records your decision and the approved seconds. Flag sends the bundle to the Fraud Squad.</p>
+          <p class="status-line" id="review-status" role="status"></p>
         </div>
-        <div class="activity-table-wrap" style="margin-top:14px">
+        <div class="activity-table-wrap mt-16" tabindex="0" role="region" aria-label="Audit bundle entries">
           <table class="table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>Category</th>
-                <th>Dur</th>
-                <th>Harness</th>
-                <th>Craft</th>
-                <th>Redacted Local Evidence</th>
-                <th>Hash</th>
+                <th scope="col" aria-label="Sequence">#</th>
+                <th scope="col">Category</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Harness</th>
+                <th scope="col">Craft score</th>
+                <th scope="col">Redacted local evidence</th>
+                <th scope="col">Hash</th>
               </tr>
             </thead>
             <tbody id="sub-entries-tbody"></tbody>
           </table>
         </div>
+        <p class="muted-sm" id="sub-entries-note"></p>
       </div>
     </section>
 
     <section id="view-setup" class="view hidden">
+      <div>
+        <h1>Setup &amp; plugins</h1>
+        <p class="muted-sm">Install the daemon, connect your account, and check supported harnesses.</p>
+      </div>
       <div class="two-col">
         <div class="card">
-          <h2>1. Install Local Daemon</h2>
+          <h2>Set up the daemon</h2>
+          <h3 class="mt-16">1. Install the daemon</h3>
           <p class="muted-sm">One command installs the daemon, logs you in, and starts tracking. Works on Windows, macOS, and Linux.</p>
-          <pre class="code-block"><code id="setup-cli-snippet"></code></pre>
-          <h3 style="margin-top:16px">2. Wrap Any CLI Agent (Agent Time Excluded)</h3>
-          <pre class="code-block"><code>goodvibes wrap --harness claude-code -- claude -p
+          <pre class="code-block" tabindex="0"><code id="setup-cli-snippet"># macOS / Linux
+curl -fsSL &lt;this site&gt;/install.sh | sh -s -- YOUR_API_KEY</code></pre>
+          <h3 class="mt-16">2. Wrap any CLI agent (agent time excluded)</h3>
+          <pre class="code-block" tabindex="0"><code>goodvibes wrap --harness claude-code -- claude -p
 goodvibes wrap --harness codex --mode prompt_vtt -- codex</code></pre>
-          <h3 style="margin-top:16px">3. Submit Verifiable Audit Bundle</h3>
-          <pre class="code-block"><code>goodvibes bundle --project MY_PROJECT --program "YSWS" --upload</code></pre>
+          <h3 class="mt-16">3. Submit a verifiable audit bundle</h3>
+          <pre class="code-block" tabindex="0"><code>goodvibes bundle --project MY_PROJECT --program "YSWS" --upload</code></pre>
         </div>
 
         <div class="card">
-          <h2>Account, API Keys &amp; Privacy</h2>
+          <h2>Account, API keys &amp; privacy</h2>
           <div id="setup-account-box"></div>
           <div class="divider"></div>
-          <h3>Supported Harnesses &amp; Plugins</h3>
+          <h3>Supported harnesses &amp; plugins</h3>
           <ul class="plugin-list">
             <li><strong>T3 Code</strong> — <code>plugins/t3-code/</code> + <code>plugins/browser-ext/</code></li>
             <li><strong>Claude Code</strong> — <code>plugins/claude-code/</code></li>
             <li><strong>Cursor / VS Code / Windsurf</strong> — <code>plugins/vscode-cursor/</code></li>
             <li><strong>Voice-to-Text (VTT)</strong> — <code>plugins/vtt/</code></li>
-            <li><strong>WakaTime Compatible</strong> — <code>POST /api/hackatime/v1/users/current/heartbeats</code></li>
+            <li><strong>WakaTime compatible</strong> — <code>POST /api/hackatime/v1/users/current/heartbeats</code></li>
           </ul>
         </div>
       </div>
     </section>
   </main>
+
+  <footer class="footer">GoodVibes · Go · AGPLv3</footer>
 
   <script src="/app.js"></script>
 </body>
