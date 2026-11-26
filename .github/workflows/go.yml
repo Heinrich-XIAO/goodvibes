@@ -1,0 +1,55 @@
+name: Go
+
+# Tests the Go server and daemon on every push and pull request.
+# A push to goodvibes-go then deploys the server to Vercel production, after the tests pass.
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet and test server
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Vet and test daemon
+        working-directory: daemon
+        run: |
+          go vet ./...
+          go test ./...
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/goodvibes-go'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: vercel-production
+      cancel-in-progress: false
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          url=$(npx --yes vercel@59.1.4 deploy --prod --yes --token "$VERCEL_TOKEN" | tail -n 1)
+          echo "Deployed $url"
+          curl --fail --silent --show-error --retry 3 --output /dev/null "$url/"
